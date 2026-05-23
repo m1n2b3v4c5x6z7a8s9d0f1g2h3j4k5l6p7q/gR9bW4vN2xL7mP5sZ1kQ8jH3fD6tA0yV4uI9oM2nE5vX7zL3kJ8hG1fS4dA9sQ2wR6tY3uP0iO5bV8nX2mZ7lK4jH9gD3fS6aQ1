@@ -465,15 +465,27 @@ jobs:
           TEAM_ID: ${{ steps.apple.outputs.team_id }}
           APP_NAME_SAFE: ${{ steps.tauri.outputs.app_name_safe }}
         run: |
-          API_KEY_CONTENT=$(echo "$API_KEY_B64" | base64 --decode)
-          echo "::add-mask::$API_KEY_CONTENT"
+          # Decode API key to a temp file — NEVER store in a shell variable
+          # (::add-mask:: doesn't work for multi-line strings, so the key
+          # would leak line-by-line in logs)
+          API_KEY_FILE="$RUNNER_TEMP/api_key_raw.p8"
+          echo "$API_KEY_B64" | base64 --decode > "$API_KEY_FILE"
+
+          # Mask every individual line of the key so nothing leaks
+          while IFS= read -r line; do
+            [ -n "$line" ] && echo "::add-mask::$line"
+          done < "$API_KEY_FILE"
+
+          API_KEY_CONTENT=$(cat "$API_KEY_FILE")
 
           API_KEY_PATH="$RUNNER_TEMP/api_key.json"
           jq -n \
             --arg key_id "$API_KEY_ID" \
             --arg issuer_id "$API_ISSUER_ID" \
-            --arg key "$API_KEY_CONTENT" \
+            --rawfile key "$API_KEY_FILE" \
             '{key_id: $key_id, issuer_id: $issuer_id, key: $key, in_house: false}' > "$API_KEY_PATH"
+
+          rm -f "$API_KEY_FILE"
 
           if [ -f "${APP_NAME_SAFE}-iOS.ipa" ]; then
             echo "📱 Uploading iOS IPA..."
@@ -486,7 +498,8 @@ jobs:
               skip_metadata:true \
               skip_screenshots:true \
               run_precheck_before_submit:false \
-              submit_for_review:false
+              submit_for_review:false \
+              ignore_language_directory_validation:true
           fi
 
           if [ -f "${APP_NAME_SAFE}-macOS.pkg" ]; then
@@ -500,7 +513,8 @@ jobs:
               skip_metadata:true \
               skip_screenshots:true \
               run_precheck_before_submit:false \
-              submit_for_review:false
+              submit_for_review:false \
+              ignore_language_directory_validation:true
           fi
 
       - name: Upload iOS Artifact
@@ -525,6 +539,7 @@ jobs:
           rm -f $RUNNER_TEMP/cert.p12 2>/dev/null
           rm -f $RUNNER_TEMP/installer_cert.p12 2>/dev/null
           rm -f $RUNNER_TEMP/api_key.json 2>/dev/null
+          rm -f $RUNNER_TEMP/api_key_raw.p8 2>/dev/null
           rm -f $RUNNER_TEMP/profile.mobileprovision 2>/dev/null
           rm -f $RUNNER_TEMP/mac_profile.provisionprofile 2>/dev/null
           rm -rf ~/Library/MobileDevice/Provisioning\ Profiles/ 2>/dev/null
