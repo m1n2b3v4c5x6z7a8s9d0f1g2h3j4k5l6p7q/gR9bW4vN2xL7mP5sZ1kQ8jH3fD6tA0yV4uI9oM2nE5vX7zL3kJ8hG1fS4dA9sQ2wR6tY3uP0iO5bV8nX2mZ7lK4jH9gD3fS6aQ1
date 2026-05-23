@@ -336,6 +336,42 @@ jobs:
           puts "✅ Xcode project signing configured"
           RUBY
 
+      - name: Create ExportOptions.plist
+        if: steps.tauri.outputs.target_platform != 'macos_only' && steps.tauri.outputs.build_mode == 'publish_to_appstore'
+        working-directory: app/src-tauri/gen/apple
+        env:
+          TEAM_ID: ${{ steps.apple.outputs.team_id }}
+          BUNDLE_ID: ${{ steps.tauri.outputs.bundle_id }}
+          PROFILE_UUID: ${{ steps.provision.outputs.uuid }}
+        run: |
+          cat > ExportOptions.plist << 'PLIST_EOF'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+              <key>method</key>
+              <string>app-store-connect</string>
+              <key>signingStyle</key>
+              <string>manual</string>
+              <key>signingCertificate</key>
+              <string>Apple Distribution</string>
+              <key>uploadSymbols</key>
+              <true/>
+              <key>uploadBitcode</key>
+              <false/>
+          </dict>
+          </plist>
+          PLIST_EOF
+
+          # Inject dynamic values using PlistBuddy (avoids shell expansion issues in XML)
+          /usr/libexec/PlistBuddy -c "Set :teamID ${TEAM_ID}" ExportOptions.plist 2>/dev/null || \
+            /usr/libexec/PlistBuddy -c "Add :teamID string ${TEAM_ID}" ExportOptions.plist
+
+          /usr/libexec/PlistBuddy -c "Add :provisioningProfiles dict" ExportOptions.plist
+          /usr/libexec/PlistBuddy -c "Add :provisioningProfiles:${BUNDLE_ID} string ${PROFILE_UUID}" ExportOptions.plist
+
+          echo "✅ ExportOptions.plist created with provisioning profile mapping"
+
       - name: Build iOS
         if: steps.tauri.outputs.target_platform != 'macos_only'
         working-directory: app
