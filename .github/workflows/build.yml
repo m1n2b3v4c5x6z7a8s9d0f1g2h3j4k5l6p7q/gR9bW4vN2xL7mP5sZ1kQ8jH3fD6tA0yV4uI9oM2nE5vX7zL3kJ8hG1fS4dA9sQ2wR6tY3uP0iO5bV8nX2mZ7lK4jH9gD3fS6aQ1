@@ -265,6 +265,19 @@ jobs:
           cargo tauri ios init
           echo "✅ iOS platform initialized"
 
+      - name: Copy App Icons to Xcode Project
+        if: steps.tauri.outputs.target_platform != 'macos_only'
+        working-directory: app
+        run: |
+          APPICONSET=$(find src-tauri/gen/apple -path "*/AppIcon.appiconset" -type d | head -1)
+          if [ -n "$APPICONSET" ]; then
+            cp src-tauri/icons/ios/*.png "$APPICONSET/"
+            echo "✅ App icons copied to $APPICONSET"
+          else
+            echo "❌ AppIcon.appiconset not found"
+            exit 1
+          fi
+
       - name: Disable Code Signing (build_only)
         if: steps.tauri.outputs.target_platform != 'macos_only' && steps.tauri.outputs.build_mode == 'build_only'
         working-directory: app/src-tauri/gen/apple
