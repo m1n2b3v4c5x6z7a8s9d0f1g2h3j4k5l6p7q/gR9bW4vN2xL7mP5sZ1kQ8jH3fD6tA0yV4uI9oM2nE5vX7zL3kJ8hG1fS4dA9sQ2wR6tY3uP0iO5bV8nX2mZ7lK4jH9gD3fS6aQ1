@@ -494,36 +494,3 @@ jobs:
           security delete-keychain $RUNNER_TEMP/app.keychain-db 2>/dev/null || true
           git config --global --unset-all url.https://*@github.com/.insteadOf 2>/dev/null || true
           echo "🧹 Sensitive files cleaned up"
-
-  # Runs after build completes — deletes the build run in publish mode
-  # In build_only mode the run is kept so artifacts can be downloaded
-  cleanup:
-    needs: build
-    if: always()
-    runs-on: ubuntu-latest
-    permissions:
-      actions: write
-    steps:
-      - name: Check if run should be deleted
-        id: check
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          # Check if the build run has any artifacts (build_only mode uploads them)
-          ARTIFACT_COUNT=$(gh api "/repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/artifacts" --jq '.total_count' 2>/dev/null || echo "0")
-          echo "artifact_count=$ARTIFACT_COUNT" >> $GITHUB_OUTPUT
-          if [ "$ARTIFACT_COUNT" -eq "0" ]; then
-            echo "delete=true" >> $GITHUB_OUTPUT
-          else
-            echo "delete=false" >> $GITHUB_OUTPUT
-          fi
-
-      - name: Delete workflow run (publish mode only)
-        if: steps.check.outputs.delete == 'true'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          # Wait briefly so the run finishes before deletion
-          sleep 5
-          gh api -X DELETE "/repos/${{ github.repository }}/actions/runs/${{ github.run_id }}" 2>/dev/null || true
-          echo "🗑️ Workflow run deleted (no artifacts needed)"
