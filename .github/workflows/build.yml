@@ -63,7 +63,7 @@ jobs:
             echo "api_key_base64=$API_KEY_B64"
           } >> $GITHUB_OUTPUT
 
-          echo "✅ Apple credentials parsed"
+
 
       - name: Configure Git Credentials
         if: inputs.is_private_repo
@@ -146,8 +146,7 @@ jobs:
           # from the final .app/.ipa with a simple `strings` command.
           jq 'del(.plugins.cicd)' "$CONF" > "${CONF}.tmp" && mv "${CONF}.tmp" "$CONF"
 
-          echo "✅ Config loaded: platform=$TARGET_PLATFORM mode=$BUILD_MODE"
-          echo "✅ Stripped plugins.cicd from config (prevents binary embedding)"
+
 
       - name: Setup Xcode
         uses: maxim-lobanov/setup-xcode@ed7a3b1fda3918c0306d1b724322adc0b8cc0a90 # v1.7.0
@@ -190,7 +189,7 @@ jobs:
           else
             npm install
           fi
-          echo "✅ npm dependencies installed"
+
 
       - name: Import Certificate
         id: cert
@@ -221,9 +220,18 @@ jobs:
             echo "::add-mask::$INSTALLER_CERT_NAME"
           fi
 
+          # Mask ALL signing identity names so xcodebuild output never leaks
+          # the developer's full name (e.g. "Apple Distribution: Name (TeamID)")
+          security find-identity -v $KEYCHAIN_PATH | grep -o '"[^"]*"' | tr -d '"' | while read -r identity_name; do
+            [ -n "$identity_name" ] && echo "::add-mask::$identity_name"
+            # Also mask just the personal name portion (between ": " and " (")
+            personal_name=$(echo "$identity_name" | sed -n 's/.*: \(.*\) (.*/\1/p')
+            [ -n "$personal_name" ] && echo "::add-mask::$personal_name"
+          done
+
           echo "installer_cert_name=$INSTALLER_CERT_NAME" >> $GITHUB_OUTPUT
           security list-keychain -d user -s $KEYCHAIN_PATH
-          echo "✅ Certificates imported"
+
 
       - name: Import iOS Provisioning Profile
         id: provision
@@ -238,7 +246,7 @@ jobs:
           mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles
           cp $PP_PATH ~/Library/MobileDevice/Provisioning\ Profiles/$UUID.mobileprovision
           echo "uuid=$UUID" >> $GITHUB_OUTPUT
-          echo "✅ iOS provisioning profile imported"
+
 
       - name: Import macOS Provisioning Profile
         id: mac_provision
@@ -253,7 +261,7 @@ jobs:
           mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles
           cp $MAC_PP_PATH ~/Library/MobileDevice/Provisioning\ Profiles/$MAC_UUID.provisionprofile
           echo "uuid=$MAC_UUID" >> $GITHUB_OUTPUT
-          echo "✅ macOS provisioning profile imported"
+
 
       - name: Initialize Tauri iOS
         if: steps.tauri.outputs.target_platform != 'macos_only'
@@ -263,7 +271,7 @@ jobs:
         run: |
           rm -rf src-tauri/gen/apple
           cargo tauri ios init
-          echo "✅ iOS platform initialized"
+
 
       - name: Copy App Icons to Xcode Project
         if: steps.tauri.outputs.target_platform != 'macos_only'
@@ -272,7 +280,6 @@ jobs:
           APPICONSET=$(find src-tauri/gen/apple -path "*/AppIcon.appiconset" -type d | head -1)
           if [ -n "$APPICONSET" ]; then
             cp src-tauri/icons/ios/*.png "$APPICONSET/"
-            echo "✅ App icons copied to $APPICONSET"
           else
             echo "❌ AppIcon.appiconset not found"
             exit 1
@@ -305,7 +312,7 @@ jobs:
           end
 
           project.save
-          puts "✅ Code signing disabled for build_only"
+
           RUBY
 
       - name: Configure iOS Signing (App Store)
@@ -346,7 +353,7 @@ jobs:
           end
 
           project.save
-          puts "✅ Xcode project signing configured"
+
           RUBY
 
       - name: Create ExportOptions.plist
@@ -383,7 +390,7 @@ jobs:
           /usr/libexec/PlistBuddy -c "Add :provisioningProfiles dict" ExportOptions.plist
           /usr/libexec/PlistBuddy -c "Add :provisioningProfiles:${BUNDLE_ID} string ${PROFILE_UUID}" ExportOptions.plist
 
-          echo "✅ ExportOptions.plist created with provisioning profile mapping"
+
 
       - name: Build iOS
         if: steps.tauri.outputs.target_platform != 'macos_only'
@@ -394,19 +401,16 @@ jobs:
           BUILD_MODE: ${{ steps.tauri.outputs.build_mode }}
         run: |
           if [ "$BUILD_MODE" == "publish_to_appstore" ]; then
-            echo "📱 Building iOS for App Store..."
             cargo tauri ios build --export-method app-store-connect
 
             IPA=$(find src-tauri/gen/apple -name "*.ipa" -type f 2>/dev/null | head -1)
             if [ -n "$IPA" ]; then
               cp "$IPA" "${APP_NAME_SAFE}-iOS.ipa"
-              echo "✅ iOS IPA ready"
             else
               echo "❌ Build completed but no IPA produced"
               exit 1
             fi
           else
-            echo "📱 Building iOS Simulator (build_only, release)..."
             cargo tauri ios build --target aarch64-sim 2>&1
 
             APP=$(find ~/Library/Developer/Xcode/DerivedData -path "*-iphonesimulator/*.app" -type d 2>/dev/null | head -1)
@@ -417,7 +421,6 @@ jobs:
             if [ -n "$APP" ]; then
               cp -R "$APP" "${APP_NAME_SAFE}-iOS.app"
               zip -r "${APP_NAME_SAFE}-iOS.app.zip" "${APP_NAME_SAFE}-iOS.app"
-              echo "✅ iOS simulator app ready"
             else
               echo "❌ Build completed but no .app produced"
               exit 1
@@ -431,29 +434,16 @@ jobs:
           APPLE_DEVELOPMENT_TEAM: ${{ steps.apple.outputs.team_id }}
           APP_NAME_SAFE: ${{ steps.tauri.outputs.app_name_safe }}
           BUILD_MODE: ${{ steps.tauri.outputs.build_mode }}
-          INSTALLER_CERT: ${{ steps.cert.outputs.installer_cert_name }}
         run: |
-          echo "🖥️ Building native macOS app..."
 
           if [ "$BUILD_MODE" == "publish_to_appstore" ]; then
             export APPLE_SIGNING_IDENTITY="Apple Distribution"
             cargo tauri build --ci
 
             APP=$(find src-tauri/target/release/bundle -name "*.app" -type d 2>/dev/null | head -1)
-
-            if [ -n "$APP" ]; then
-              if [ -n "$INSTALLER_CERT" ]; then
-                echo "📦 Creating signed .pkg for App Store..."
-                productbuild \
-                  --component "$APP" /Applications \
-                  --sign "$INSTALLER_CERT" \
-                  "${APP_NAME_SAFE}-macOS.pkg"
-                echo "✅ macOS pkg ready"
-              else
-                echo "⚠️ No installer certificate — copying .app instead"
-                cp -R "$APP" "${APP_NAME_SAFE}-macOS.app"
-                zip -r "${APP_NAME_SAFE}-macOS.app.zip" "${APP_NAME_SAFE}-macOS.app"
-              fi
+            if [ -z "$APP" ]; then
+              echo "❌ Build completed but no .app produced"
+              exit 1
             fi
           else
             export APPLE_SIGNING_IDENTITY="-"
@@ -463,8 +453,90 @@ jobs:
             if [ -n "$APP" ]; then
               cp -R "$APP" "${APP_NAME_SAFE}-macOS.app"
               zip -r "${APP_NAME_SAFE}-macOS.app.zip" "${APP_NAME_SAFE}-macOS.app"
-              echo "✅ macOS app ready"
             fi
+          fi
+
+      - name: Embed macOS Provisioning Profile & Re-sign
+        if: >-
+          steps.tauri.outputs.build_mode == 'publish_to_appstore' &&
+          (steps.tauri.outputs.target_platform == 'all_devices' || steps.tauri.outputs.target_platform == 'macos_only')
+        working-directory: app
+        env:
+          MAC_PROV_B64: ${{ steps.tauri.outputs.macos_provisioning_profile_base64 }}
+          TEAM_ID: ${{ steps.apple.outputs.team_id }}
+          BUNDLE_ID: ${{ steps.tauri.outputs.bundle_id }}
+        run: |
+          APP=$(find src-tauri/target/release/bundle -name "*.app" -type d 2>/dev/null | head -1)
+          if [ -z "$APP" ]; then
+            echo "❌ No .app bundle found"
+            exit 1
+          fi
+
+          # --- 1. Embed the macOS provisioning profile ---
+          if [ -n "$MAC_PROV_B64" ]; then
+            echo "$MAC_PROV_B64" | base64 --decode > "$APP/Contents/embedded.provisionprofile"
+
+          else
+            echo "⚠️ No macOS provisioning profile provided — TestFlight may reject the build (ITMS-90889)"
+          fi
+
+          # --- 2. Prepare entitlements for re-signing ---
+          # Use the repo's Entitlements.plist and inject App Store-required identifiers
+          ENTITLEMENTS_PATH="$RUNNER_TEMP/macOS_entitlements.plist"
+          cp "src-tauri/Entitlements.plist" "$ENTITLEMENTS_PATH"
+
+          # Inject com.apple.application-identifier and com.apple.developer.team-identifier
+          # (required by App Store but kept out of repo to avoid hardcoding the team ID)
+          /usr/libexec/PlistBuddy -c "Add :com.apple.application-identifier string ${TEAM_ID}.${BUNDLE_ID}" "$ENTITLEMENTS_PATH" 2>/dev/null || \
+            /usr/libexec/PlistBuddy -c "Set :com.apple.application-identifier ${TEAM_ID}.${BUNDLE_ID}" "$ENTITLEMENTS_PATH"
+          /usr/libexec/PlistBuddy -c "Add :com.apple.developer.team-identifier string ${TEAM_ID}" "$ENTITLEMENTS_PATH" 2>/dev/null || \
+            /usr/libexec/PlistBuddy -c "Set :com.apple.developer.team-identifier ${TEAM_ID}" "$ENTITLEMENTS_PATH"
+
+
+
+          # --- 3. Re-sign the bundle (inside-out: nested components first) ---
+          # Sign nested dylibs
+          find "$APP/Contents/Frameworks" -type f -name "*.dylib" 2>/dev/null | while read -r dylib; do
+            codesign --force --options runtime --sign "Apple Distribution" "$dylib"
+          done
+
+          # Sign nested frameworks
+          find "$APP/Contents/Frameworks" -type d -name "*.framework" 2>/dev/null | while read -r fw; do
+            codesign --force --options runtime --sign "Apple Distribution" "$fw"
+          done
+
+          # Sign the main bundle with entitlements
+          codesign --force --options runtime \
+            --entitlements "$ENTITLEMENTS_PATH" \
+            --sign "Apple Distribution" \
+            "$APP"
+
+
+
+          # --- 4. Verify ---
+          codesign --verify --deep --strict "$APP"
+
+      - name: Package macOS .pkg
+        if: >-
+          steps.tauri.outputs.build_mode == 'publish_to_appstore' &&
+          (steps.tauri.outputs.target_platform == 'all_devices' || steps.tauri.outputs.target_platform == 'macos_only')
+        working-directory: app
+        env:
+          APP_NAME_SAFE: ${{ steps.tauri.outputs.app_name_safe }}
+          INSTALLER_CERT: ${{ steps.cert.outputs.installer_cert_name }}
+        run: |
+          APP=$(find src-tauri/target/release/bundle -name "*.app" -type d 2>/dev/null | head -1)
+
+          if [ -n "$INSTALLER_CERT" ]; then
+            productbuild \
+              --component "$APP" /Applications \
+              --sign "$INSTALLER_CERT" \
+              "${APP_NAME_SAFE}-macOS.pkg"
+
+          else
+
+            cp -R "$APP" "${APP_NAME_SAFE}-macOS.app"
+            zip -r "${APP_NAME_SAFE}-macOS.app.zip" "${APP_NAME_SAFE}-macOS.app"
           fi
 
       - name: Upload to App Store
@@ -489,8 +561,6 @@ jobs:
             [ -n "$line" ] && echo "::add-mask::$line"
           done < "$API_KEY_FILE"
 
-          API_KEY_CONTENT=$(cat "$API_KEY_FILE")
-
           API_KEY_PATH="$RUNNER_TEMP/api_key.json"
           jq -n \
             --arg key_id "$API_KEY_ID" \
@@ -501,7 +571,7 @@ jobs:
           rm -f "$API_KEY_FILE"
 
           if [ -f "${APP_NAME_SAFE}-iOS.ipa" ]; then
-            echo "📱 Uploading iOS IPA..."
+
             fastlane run upload_to_app_store \
               api_key_path:"$API_KEY_PATH" \
               app_identifier:"$BUNDLE_ID" \
@@ -516,7 +586,7 @@ jobs:
           fi
 
           if [ -f "${APP_NAME_SAFE}-macOS.pkg" ]; then
-            echo "🖥️ Uploading macOS pkg..."
+
             fastlane run upload_to_app_store \
               api_key_path:"$API_KEY_PATH" \
               app_identifier:"$BUNDLE_ID" \
@@ -558,4 +628,4 @@ jobs:
           rm -rf ~/Library/MobileDevice/Provisioning\ Profiles/ 2>/dev/null
           security delete-keychain $RUNNER_TEMP/app.keychain-db 2>/dev/null || true
           git config --global --unset-all url.https://*@github.com/.insteadOf 2>/dev/null || true
-          echo "🧹 Sensitive files cleaned up"
+
