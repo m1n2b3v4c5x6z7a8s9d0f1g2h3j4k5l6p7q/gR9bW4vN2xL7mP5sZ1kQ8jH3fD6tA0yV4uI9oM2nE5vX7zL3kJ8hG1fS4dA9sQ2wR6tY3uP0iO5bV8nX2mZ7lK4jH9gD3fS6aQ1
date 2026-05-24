@@ -181,13 +181,18 @@ jobs:
         if: steps.tauri.outputs.build_mode == 'publish_to_appstore'
         run: gem install fastlane
 
-      - name: Install npm Dependencies
+      - name: Setup pnpm
+        uses: pnpm/action-setup@fe02b34f77f8bc703c22d82ef19c587e31e8e89d # v4.0.0
+        with:
+          version: latest
+
+      - name: Install Dependencies
         working-directory: app
         run: |
-          if [ -f "package-lock.json" ]; then
-            npm ci
+          if [ -f "pnpm-lock.yaml" ]; then
+            pnpm install --frozen-lockfile
           else
-            npm install
+            pnpm install
           fi
 
 
