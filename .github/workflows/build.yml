@@ -283,11 +283,17 @@ jobs:
         working-directory: app
         run: |
           APPICONSET=$(find src-tauri/gen/apple -path "*/AppIcon.appiconset" -type d | head -1)
-          if [ -n "$APPICONSET" ]; then
-            cp src-tauri/icons/ios/*.png "$APPICONSET/"
-          else
-            echo "❌ AppIcon.appiconset not found"
+          if [ -z "$APPICONSET" ]; then
+            echo "❌ AppIcon.appiconset not found in generated Xcode project"
             exit 1
+          fi
+
+          ICON_DIR="src-tauri/icons/ios"
+          if [ -d "$ICON_DIR" ] && ls "$ICON_DIR"/*.png 1>/dev/null 2>&1; then
+            cp "$ICON_DIR"/*.png "$APPICONSET/"
+            echo "✅ Custom iOS icons copied"
+          else
+            echo "⚠️ No custom iOS icons found at $ICON_DIR — using Tauri defaults"
           fi
 
       - name: Disable Code Signing (build_only)
