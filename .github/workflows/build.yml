@@ -140,6 +140,10 @@ jobs:
           echo "ios_provisioning_profile_base64=$IOS_PROV" >> $GITHUB_OUTPUT
           echo "macos_provisioning_profile_base64=$MAC_PROV" >> $GITHUB_OUTPUT
 
+          # Read macOS bundleVersion before stripping
+          MAC_BUNDLE_VERSION=$(jq -r '.bundle.macOS.bundleVersion' "$CONF")
+          echo "mac_bundle_version=$MAC_BUNDLE_VERSION" >> $GITHUB_OUTPUT
+
           # CRITICAL: Strip the cicd plugin config from tauri.conf.json before build.
           # Tauri's generate_context!() embeds the entire plugins section into the
           # compiled binary. Without this, provisioning profiles would be extractable
@@ -446,6 +450,8 @@ jobs:
           APP_NAME_SAFE: ${{ steps.tauri.outputs.app_name_safe }}
           BUILD_MODE: ${{ steps.tauri.outputs.build_mode }}
         run: |
+          # Clean stale bundle output that may have been restored from cache
+          rm -rf src-tauri/target/release/bundle
 
           if [ "$BUILD_MODE" == "publish_to_appstore" ]; then
             export APPLE_SIGNING_IDENTITY="Apple Distribution"
@@ -476,12 +482,20 @@ jobs:
           MAC_PROV_B64: ${{ steps.tauri.outputs.macos_provisioning_profile_base64 }}
           TEAM_ID: ${{ steps.apple.outputs.team_id }}
           BUNDLE_ID: ${{ steps.tauri.outputs.bundle_id }}
+          MAC_BUNDLE_VERSION: ${{ steps.tauri.outputs.mac_bundle_version }}
         run: |
           APP=$(find src-tauri/target/release/bundle -name "*.app" -type d 2>/dev/null | head -1)
           if [ -z "$APP" ]; then
             echo "❌ No .app bundle found"
             exit 1
           fi
+
+          # --- 0. Patch CFBundleVersion and log actual binary identity ---
+          echo "📋 Built .app: $APP"
+          echo "   CFBundleIdentifier: $(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP/Contents/Info.plist")"
+          echo "   CFBundleVersion (before patch): $(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$APP/Contents/Info.plist")"
+          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion ${MAC_BUNDLE_VERSION}" "$APP/Contents/Info.plist"
+          echo "   CFBundleVersion (after patch): ${MAC_BUNDLE_VERSION}"
 
           # --- 1. Embed the macOS provisioning profile ---
           if [ -n "$MAC_PROV_B64" ]; then
